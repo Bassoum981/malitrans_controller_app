@@ -1,5 +1,6 @@
-import 'package:intl/intl.dart';
+import 'package:malitrans_controleur_app/core/utils/format.dart';
 
+/// Billet vendu à bord : réponse de `POST /api/billets/acheter` (docs/API.md §5.6).
 class BilletUniqueModel {
   final int id;
   final String numeroBillet;
@@ -7,6 +8,9 @@ class BilletUniqueModel {
   final String statut;
   final num montantPaye;
   final String modePaiement;
+
+  /// QR signé MT1 à imprimer tel quel sur le ticket.
+  final String qrCode;
   final String? referencePaiement;
   final int? passagerId;
   final String? passagerNomComplet;
@@ -16,7 +20,9 @@ class BilletUniqueModel {
   final String? dateTrajet;
   final String? heureDebut;
   final String? busImmatriculation;
-  final String? siegeNumero;
+
+  /// Vendu sans réseau (QR signé par l'appareil, en attente de synchronisation).
+  final bool horsLigne;
 
   const BilletUniqueModel({
     required this.id,
@@ -25,6 +31,7 @@ class BilletUniqueModel {
     required this.statut,
     required this.montantPaye,
     required this.modePaiement,
+    required this.qrCode,
     this.referencePaiement,
     this.passagerId,
     this.passagerNomComplet,
@@ -34,59 +41,34 @@ class BilletUniqueModel {
     this.dateTrajet,
     this.heureDebut,
     this.busImmatriculation,
-    this.siegeNumero,
+    this.horsLigne = false,
   });
 
-  String get valeurQr => numeroBillet;
+  String get montantFormate => Format.fcfa(montantPaye);
 
-  String get montantFormate {
-    final fmt = NumberFormat('#,###', 'fr_FR');
-    return '${fmt.format(montantPaye.round()).replaceAll(',', ' ')} FCFA';
-  }
-
-  String get dateEmissionFormatee {
-    if (dateEmission.isEmpty) return '-';
-    final parsed = DateTime.tryParse(dateEmission);
-    if (parsed == null) return dateEmission;
-    return DateFormat('dd/MM/yyyy HH:mm').format(parsed.toLocal());
-  }
+  String get dateEmissionFormatee => Format.dateHeure(dateEmission);
 
   factory BilletUniqueModel.fromJson(Map<String, dynamic> json) {
-    final rawId = json['id'];
-    final parsedId =
-    rawId is int ? rawId : int.tryParse(rawId?.toString() ?? '') ?? 0;
-
-    final rawMontant = json['montantPaye'] ?? json['montant'] ?? 0;
-    final num montant =
-    rawMontant is num ? rawMontant : num.tryParse(rawMontant.toString()) ?? 0;
-
-    int? parseNullableInt(dynamic v) {
-      if (v == null) return null;
-      if (v is int) return v;
-      return int.tryParse(v.toString());
-    }
-
+    final numero = (json['numeroBillet'] ?? '').toString();
     return BilletUniqueModel(
-      id: parsedId,
-      numeroBillet: (json['numeroBillet'] ??
-          json['codeBillet'] ??
-          'BILLET-${DateTime.now().millisecondsSinceEpoch}')
-          .toString(),
-      dateEmission: (json['dateEmission'] ?? DateTime.now().toIso8601String())
-          .toString(),
-      statut: (json['statut'] ?? 'EMIS').toString(),
-      montantPaye: montant,
+      id: parseInt(json['id']) ?? 0,
+      numeroBillet: numero,
+      dateEmission: (json['dateEmission'] ?? '').toString(),
+      statut: (json['statut'] ?? '').toString(),
+      montantPaye: parseNum(json['montantPaye']),
       modePaiement: (json['modePaiement'] ?? 'ESPECES').toString(),
-      referencePaiement: json['referencePaiement']?.toString(),
-      passagerId: parseNullableInt(json['passagerId']),
-      passagerNomComplet: json['passagerNomComplet']?.toString(),
-      affectationId: parseNullableInt(json['affectationId']),
-      ligneNumero: json['ligneNumero']?.toString(),
-      ligneNom: json['ligneNom']?.toString(),
-      dateTrajet: json['dateTrajet']?.toString(),
-      heureDebut: json['heureDebut']?.toString(),
-      busImmatriculation: json['busImmatriculation']?.toString(),
-      siegeNumero: json['siegeNumero']?.toString(),
+      // Repli sur le numéro si le serveur n'a pas fourni de QR signé.
+      qrCode: (json['qrCode'] ?? numero).toString(),
+      referencePaiement: parseString(json['referencePaiement']),
+      passagerId: parseInt(json['passagerId']),
+      passagerNomComplet: parseString(json['passagerNomComplet']),
+      affectationId: parseInt(json['affectationId']),
+      ligneNumero: parseString(json['ligneNumero']),
+      ligneNom: parseString(json['ligneNom']),
+      dateTrajet: parseString(json['dateTrajet']),
+      heureDebut: parseString(json['heureDebut']),
+      busImmatriculation: parseString(json['busImmatriculation']),
+      horsLigne: json['horsLigne'] == true,
     );
   }
 }

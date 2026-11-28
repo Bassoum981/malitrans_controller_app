@@ -1,252 +1,231 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:malitrans_controleur_app/core/error/api_exception.dart';
 import 'package:malitrans_controleur_app/core/theme/app_theme.dart';
-import 'package:malitrans_controleur_app/features/auth/data/models/controleur_model.dart';
-import 'package:malitrans_controleur_app/features/auth/domain/repositories/auth_repository.dart';
+import 'package:malitrans_controleur_app/core/ui/components.dart';
+import 'package:malitrans_controleur_app/core/ui/motion.dart';
+import 'package:malitrans_controleur_app/features/auth/presentation/controllers/session_controller.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
-  final ValueChanged<ControleurModel> onSuccess;
-
-  const LoginScreen({
-    super.key,
-    required this.onSuccess,
-  });
+  const LoginScreen({super.key});
 
   @override
   ConsumerState<LoginScreen> createState() => _LoginScreenState();
 }
 
 class _LoginScreenState extends ConsumerState<LoginScreen> {
-  final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _passwordFocus = FocusNode();
 
-  bool _obscurePassword = true;
-  bool _isLoading = false;
-  String? _errorMessage;
+  bool _masque = true;
+  bool _chargement = false;
+  String? _erreur;
+
+  @override
+  void initState() {
+    super.initState();
+    // Message laissé par une expiration de session (403).
+    _erreur = ref.read(messageConnexionProvider);
+  }
 
   @override
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
+    _passwordFocus.dispose();
     super.dispose();
   }
 
-  void _submit() {
-    if (!_formKey.currentState!.validate()) return;
+  String? _valider() {
+    final email = _emailController.text.trim();
+    if (email.isEmpty) return 'Saisissez votre adresse email.';
+    if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email)) {
+      return "Cette adresse email n'est pas valide.";
+    }
+    if (_passwordController.text.isEmpty) return 'Saisissez votre mot de passe.';
+    return null;
+  }
 
+  Future<void> _connecter() async {
+    final invalide = _valider();
+    if (invalide != null) {
+      HapticFeedback.heavyImpact();
+      setState(() => _erreur = invalide);
+      return;
+    }
+    FocusScope.of(context).unfocus();
     setState(() {
-      _isLoading = true;
-      _errorMessage = null;
+      _chargement = true;
+      _erreur = null;
     });
-
-    ref.read(authRepositoryProvider).login(
-      email: _emailController.text,
-      motDePasse: _passwordController.text,
-      onSuccess: (user) {
-        if (!mounted) return;
-        setState(() {
-          _isLoading = false;
-        });
-        widget.onSuccess(user);
-      },
-      onError: (err) {
-        if (!mounted) return;
-        setState(() {
-          _errorMessage = err.message;
-          _isLoading = false;
-        });
-      },
-    );
+    try {
+      await ref.read(sessionProvider.notifier).login(_emailController.text, _passwordController.text);
+    } catch (e) {
+      if (!mounted) return;
+      HapticFeedback.heavyImpact();
+      setState(() => _erreur = ApiException.from(e).message);
+    } finally {
+      if (mounted) setState(() => _chargement = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final borderColor = isDark ? AppTheme.navy800 : AppTheme.slate200;
-    final cardBg = isDark ? AppTheme.navy900 : Colors.white;
-    final mutedText = isDark ? AppTheme.slate400 : AppTheme.slate500;
+    final c = context.c;
+    final t = context.t;
 
     return Scaffold(
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
+            physics: const BouncingScrollPhysics(),
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 420),
-              child: Container(
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  color: cardBg,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: borderColor),
-                ),
-                child: Form(
-                  key: _formKey,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Row(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 72,
+                      height: 72,
+                      decoration: BoxDecoration(color: c.primaryFill, borderRadius: BorderRadius.circular(20)),
+                      child: Icon(Icons.directions_bus_rounded, size: 40, color: c.onPrimaryFill),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  Text('MaliTrans Contrôle', textAlign: TextAlign.center, style: t.headlineMedium),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Connectez-vous pour ouvrir votre service,\nvendre et contrôler à bord.',
+                    textAlign: TextAlign.center,
+                    style: t.bodyMedium?.copyWith(color: c.labelSecondary),
+                  ),
+                  const SizedBox(height: 36),
+                  // Champs groupés dans une seule surface, séparés par un filet.
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(18),
+                    child: ColoredBox(
+                      color: c.surface,
+                      child: Column(
                         children: [
-                          const Text(
-                            'MALI',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: 1.2,
-                              fontSize: 20,
-                            ),
+                          _Champ(
+                            controller: _emailController,
+                            icone: Icons.mail_outline_rounded,
+                            hint: 'Adresse email',
+                            clavier: TextInputType.emailAddress,
+                            action: TextInputAction.next,
+                            autofill: const [AutofillHints.email],
+                            onSubmitted: (_) => _passwordFocus.requestFocus(),
                           ),
-                          Text(
-                            'TRANS',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w400,
-                              letterSpacing: 1.2,
-                              fontSize: 20,
-                              color: mutedText,
-                            ),
+                          Padding(
+                            padding: const EdgeInsets.only(left: 52),
+                            child: Container(height: 0.6, color: c.separator),
                           ),
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 3,
-                            ),
-                            decoration: BoxDecoration(
-                              color: isDark
-                                  ? AppTheme.accentBlueDeep
-                                  : AppTheme.slate100,
-                              borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: borderColor),
-                            ),
-                            child: Text(
-                              'CONTRÔLEUR',
-                              style: TextStyle(
-                                fontFamily: 'monospace',
-                                fontSize: 10,
-                                fontWeight: FontWeight.w700,
-                                color: isDark
-                                    ? AppTheme.accentBlue
-                                    : AppTheme.slate900,
+                          _Champ(
+                            controller: _passwordController,
+                            focusNode: _passwordFocus,
+                            icone: Icons.lock_outline_rounded,
+                            hint: 'Mot de passe',
+                            masque: _masque,
+                            action: TextInputAction.go,
+                            autofill: const [AutofillHints.password],
+                            onSubmitted: (_) => _connecter(),
+                            suffixe: Pressable(
+                              onTap: () => setState(() => _masque = !_masque),
+                              scale: 0.85,
+                              child: Padding(
+                                padding: const EdgeInsets.all(12),
+                                child: Icon(
+                                  _masque ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                                  size: 20,
+                                  color: c.labelSecondary,
+                                ),
                               ),
                             ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 16),
-                      const Text(
-                        'Connexion Agent',
-                        style: TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Vérifiez les titres à bord et émettez des billets à usage unique.',
-                        style: TextStyle(fontSize: 13, color: mutedText),
-                      ),
-                      const SizedBox(height: 24),
-                      if (_errorMessage != null) ...[
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: AppTheme.red600.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: AppTheme.red600.withValues(alpha: 0.4),
-                            ),
-                          ),
-                          child: Text(
-                            _errorMessage!,
-                            style: const TextStyle(
-                              color: AppTheme.red600,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                      ],
-                      const Text(
-                        'Adresse email',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      TextFormField(
-                        controller: _emailController,
-                        keyboardType: TextInputType.emailAddress,
-                        textInputAction: TextInputAction.next,
-                        decoration: const InputDecoration(
-                          hintText: 'controleur@malitrans.ml',
-                        ),
-                        validator: (value) {
-                          final v = value?.trim() ?? '';
-                          if (v.isEmpty) return "L'email est obligatoire";
-                          if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
-                              .hasMatch(v)) {
-                            return "Format d'email invalide";
-                          }
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 16),
-                      const Text(
-                        'Mot de passe',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      TextFormField(
-                        controller: _passwordController,
-                        obscureText: _obscurePassword,
-                        textInputAction: TextInputAction.done,
-                        onFieldSubmitted: (_) => _submit(),
-                        decoration: InputDecoration(
-                          hintText: '••••••••',
-                          suffixIcon: IconButton(
-                            onPressed: () {
-                              setState(() {
-                                _obscurePassword = !_obscurePassword;
-                              });
-                            },
-                            icon: Icon(
-                              _obscurePassword
-                                  ? Icons.visibility_off_outlined
-                                  : Icons.visibility_outlined,
-                              size: 20,
-                            ),
-                          ),
-                        ),
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Le mot de passe est obligatoire';
-                          }
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 24),
-                      ElevatedButton(
-                        onPressed: _isLoading ? null : _submit,
-                        child: _isLoading
-                            ? const SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                            : const Text('Se connecter'),
-                      ),
-                    ],
+                    ),
                   ),
-                ),
+                  AnimatedSize(
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeOutCubic,
+                    child: _erreur == null
+                        ? const SizedBox(width: double.infinity)
+                        : Padding(padding: const EdgeInsets.only(top: 16), child: MessageErreur(_erreur!)),
+                  ),
+                  const SizedBox(height: 24),
+                  MtButton(label: 'Se connecter', chargement: _chargement, onPressed: _connecter),
+                ],
               ),
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _Champ extends StatelessWidget {
+  final TextEditingController controller;
+  final FocusNode? focusNode;
+  final IconData icone;
+  final String hint;
+  final bool masque;
+  final TextInputType? clavier;
+  final TextInputAction action;
+  final Iterable<String> autofill;
+  final ValueChanged<String> onSubmitted;
+  final Widget? suffixe;
+
+  const _Champ({
+    required this.controller,
+    required this.icone,
+    required this.hint,
+    required this.action,
+    required this.autofill,
+    required this.onSubmitted,
+    this.focusNode,
+    this.masque = false,
+    this.clavier,
+    this.suffixe,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return SizedBox(
+      height: 56,
+      child: Row(
+        children: [
+          const SizedBox(width: 16),
+          Icon(icone, size: 22, color: c.labelSecondary),
+          const SizedBox(width: 14),
+          Expanded(
+            child: TextField(
+              controller: controller,
+              focusNode: focusNode,
+              obscureText: masque,
+              keyboardType: clavier,
+              textInputAction: action,
+              autofillHints: autofill,
+              autocorrect: false,
+              enableSuggestions: !masque,
+              onSubmitted: onSubmitted,
+              style: context.t.bodyLarge,
+              decoration: InputDecoration(
+                hintText: hint,
+                hintStyle: context.t.bodyLarge?.copyWith(color: c.labelTertiary),
+                border: InputBorder.none,
+                isCollapsed: true,
+              ),
+            ),
+          ),
+          suffixe ?? const SizedBox(width: 16),
+        ],
       ),
     );
   }

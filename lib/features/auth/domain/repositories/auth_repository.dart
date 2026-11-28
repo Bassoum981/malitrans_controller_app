@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:malitrans_controleur_app/core/constants/api_constants.dart';
 import 'package:malitrans_controleur_app/core/error/api_exception.dart';
 import 'package:malitrans_controleur_app/core/network/dio_client.dart';
 import 'package:malitrans_controleur_app/core/storage/controleur_storage.dart';
@@ -26,53 +27,29 @@ class AuthRepository {
   })  : _remote = remote,
         _storage = storage;
 
-  void login({
+  Future<ControleurModel> login({
     required String email,
     required String motDePasse,
-    required void Function(ControleurModel controleur) onSuccess,
-    required void Function(ApiException error) onError,
-  }) {
-    _remote.login(
-      email: email,
-      motDePasse: motDePasse,
-      onSuccess: (result) {
-        _storage.saveToken(
-          result.token,
-          onDone: () {
-            _storage.saveControleur(
-              result.controleur.toJson(),
-              onDone: () => onSuccess(result.controleur),
-            );
-          },
-        );
-      },
-      onError: onError,
-    );
+  }) async {
+    final result = await _remote.login(email: email, motDePasse: motDePasse);
+    if (result.controleur.role != ApiConstants.roleControleur) {
+      throw const ApiException(
+        message: 'Cette application est réservée aux contrôleurs (receveurs).',
+      );
+    }
+    await _storage.saveToken(result.token);
+    await _storage.saveControleur(result.controleur.toJson());
+    return result.controleur;
   }
 
-  void restoreSession({
-    required void Function(ControleurModel? controleur) onResult,
-  }) {
-    _storage.getToken(
-      onResult: (token) {
-        if (token == null || token.isEmpty) {
-          onResult(null);
-          return;
-        }
-        _storage.getControleur(
-          onResult: (cached) {
-            if (cached == null) {
-              onResult(null);
-              return;
-            }
-            onResult(ControleurModel.fromJson(cached));
-          },
-        );
-      },
-    );
+  Future<ControleurModel?> restoreSession() async {
+    final token = await _storage.getToken();
+    if (token == null || token.isEmpty) return null;
+    final cached = await _storage.getControleur();
+    if (cached == null) return null;
+    final controleur = ControleurModel.fromJson(cached);
+    return controleur.role == ApiConstants.roleControleur ? controleur : null;
   }
 
-  void logout({void Function()? onDone}) {
-    _storage.clearAll(onDone: onDone);
-  }
+  Future<void> logout() => _storage.clearAll();
 }

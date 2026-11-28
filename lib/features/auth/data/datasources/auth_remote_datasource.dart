@@ -18,55 +18,33 @@ class AuthRemoteDataSource {
 
   const AuthRemoteDataSource(this._dio);
 
-  void login({
+  Future<AuthLoginResult> login({
     required String email,
     required String motDePasse,
-    required void Function(AuthLoginResult result) onSuccess,
-    required void Function(ApiException error) onError,
-  }) {
-    _dio
-        .post(
-      ApiConstants.loginEndpoint,
-      data: {
-        'email': email.trim(),
-        'motDePasse': motDePasse,
-      },
-    )
-        .then((response) {
+  }) async {
+    try {
+      final response = await _dio.post(
+        ApiConstants.loginEndpoint,
+        data: {'email': email.trim(), 'motDePasse': motDePasse},
+      );
       final data = response.data;
       if (data is! Map<String, dynamic>) {
-        onError(const ApiException(message: 'Réponse de connexion invalide.'));
-        return;
+        throw const ApiException(message: 'Réponse de connexion invalide.');
       }
-
-      final rawToken = data['token'] ?? data['accessToken'];
-      final token = rawToken?.toString() ?? '';
+      final token = (data['token'] ?? '').toString();
       if (token.isEmpty) {
-        onError(const ApiException(message: 'Token absent de la réponse.'));
-        return;
+        throw const ApiException(message: 'Token absent de la réponse.');
       }
-
-      onSuccess(
-        AuthLoginResult(
-          token: token,
-          controleur: ControleurModel.fromJson(data),
-        ),
-      );
-    }).catchError((Object error) {
-      if (error is DioException) {
-        final body = error.response?.data;
-        final msg = (body is Map<String, dynamic>)
-            ? (body['message'] ?? body['error'])?.toString()
-            : null;
-        onError(
-          ApiException(
-            message: msg ?? 'Identifiants invalides ou serveur inaccessible.',
-            statusCode: error.response?.statusCode,
-          ),
-        );
-      } else {
-        onError(ApiException(message: error.toString()));
+      return AuthLoginResult(token: token, controleur: ControleurModel.fromJson(data));
+    } on DioException catch (e) {
+      final status = e.response?.statusCode;
+      if (status == 401) {
+        throw const ApiException(message: 'Email ou mot de passe incorrect.', statusCode: 401);
       }
-    });
+      if (status == 403) {
+        throw const ApiException(message: 'Compte suspendu ou inactif.', statusCode: 403);
+      }
+      throw ApiException.from(e, parDefaut: 'Connexion impossible.');
+    }
   }
 }

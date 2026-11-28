@@ -40,6 +40,9 @@ dependencies:
   flutter_secure_storage: ^11.2.0
   qr_flutter: ^4.1.0
   intl: ^0.20.3
+  mobile_scanner: ^7.5.0
+  cryptography: ^2.9.0
+  path_provider: ^2.1.6
 
 dev_dependencies:
   flutter_test:
